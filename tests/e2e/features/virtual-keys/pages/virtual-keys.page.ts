@@ -184,7 +184,7 @@ export class VirtualKeysPage extends BasePage {
   /**
    * Open the row actions dropdown and click Edit.
    */
-  private async openVirtualKeyEditor(name: string): Promise<void> {
+  protected async openVirtualKeyEditor(name: string): Promise<void> {
     await this.searchVirtualKeys(name);
 
     const row = this.getVirtualKeyRow(name);
@@ -218,10 +218,6 @@ export class VirtualKeysPage extends BasePage {
       await this.page.keyboard.press("Escape");
       await expect(this.sheet).not.toBeVisible({ timeout: 5000 });
     }
-
-    await expect(this.page.locator("html"))
-      .not.toHaveClass(/bprogress-busy/, { timeout: 10000 })
-      .catch(() => {});
   }
 
   private async preserveBudgetUsageIfPrompted(): Promise<void> {
@@ -648,8 +644,15 @@ export class VirtualKeysPage extends BasePage {
    * Pick the key's content-logging choice in the open sheet
    */
   async setContentLogging(choice: "inherit" | "disabled" | "enabled"): Promise<void> {
-    await this.contentLoggingSelect.click();
-    await this.page.getByTestId(`vk-content-logging-option-${choice}`).click();
+    const option = this.page.getByTestId(`vk-content-logging-option-${choice}`);
+    // The menu can close again while the sheet settles, leaving the option
+    // mid-exit-animation; reopen it until the pick lands.
+    await expect(async () => {
+      if (!(await option.isVisible())) {
+        await this.contentLoggingSelect.click();
+      }
+      await option.click({ timeout: 2000 });
+    }).toPass({ timeout: 10000 });
   }
 
   /**

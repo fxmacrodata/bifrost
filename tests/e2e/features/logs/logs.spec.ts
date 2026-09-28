@@ -28,7 +28,13 @@ test.describe('LLM Logs', () => {
       for (let i = 0; i < count; i++) {
         const figure = figures.nth(i)
         await expect
-          .poll(() => figure.evaluate((el) => el.scrollWidth <= el.clientWidth), {
+          .poll(() => figure.evaluate((el) => {
+            const box = el.getBoundingClientRect()
+            const range = document.createRange()
+            range.selectNodeContents(el)
+            const content = range.getBoundingClientRect()
+            return content.left >= box.left - 0.5 && content.right <= box.right + 0.5
+          }), {
             message: `trend figure "${await figure.textContent()}" is truncated`,
           })
           .toBe(true)
@@ -68,8 +74,8 @@ test.describe('LLM Logs', () => {
       const providerFilter = logsPage.providerFilter
       const isVisible = await providerFilter.isVisible().catch(() => false)
 
-      if (!isVisible || SAMPLE_PROVIDERS.length === 0) {
-        test.skip(!isVisible || SAMPLE_PROVIDERS.length === 0, 'Provider filter not visible or no sample providers')
+      if (!isVisible) {
+        test.skip(!isVisible, 'Provider filter not visible')
         return
       }
 
@@ -88,8 +94,8 @@ test.describe('LLM Logs', () => {
       const modelFilter = logsPage.modelFilter
       const isVisible = await modelFilter.isVisible().catch(() => false)
 
-      if (!isVisible || SAMPLE_MODELS.length === 0) {
-        test.skip(!isVisible || SAMPLE_MODELS.length === 0, 'Model filter not visible or no sample models')
+      if (!isVisible) {
+        test.skip(!isVisible, 'Model filter not visible')
         return
       }
 

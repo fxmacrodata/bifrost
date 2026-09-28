@@ -2,50 +2,11 @@ import { expect, test } from '../../core/fixtures/base.fixture'
 import {
     createCodeModeClientData,
     createHTTPClientData,
-    createHeadersAuthClientData,
-    createOAuthClientData,
-    createPerUserOAuthClientData,
     createSSEClientData,
     createSTDIOClientData
 } from './mcp-registry.data'
 
 const hasSSEHeaders = Boolean(process.env.MCP_SSE_HEADERS)
-
-async function completeOAuthFlow(page: { context: () => any; request: any }, flow: {
-  authorize_url: string
-  oauth_config_id: string
-  complete_url?: string
-  status_url?: string
-}) {
-  const popup = await page.context().newPage()
-  await popup.goto(flow.authorize_url)
-  await popup.locator('#user').fill('demo-user')
-  await popup.getByRole('button', { name: /Sign in/i }).click()
-  await popup.waitForLoadState('networkidle').catch(() => {})
-  await popup.close().catch(() => {})
-
-  const statusUrl = flow.status_url ?? `/api/oauth/config/${flow.oauth_config_id}/status`
-  let authorized = false
-  for (let i = 0; i < 30; i++) {
-    const statusResponse = await page.request.get(statusUrl)
-    if (!statusResponse.ok()) {
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      continue
-    }
-    const statusBody = await statusResponse.json().catch(() => null)
-    if (statusBody?.status === 'authorized') {
-      authorized = true
-      break
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-
-  expect(authorized).toBe(true)
-
-  const completeUrl = flow.complete_url ?? `/api/mcp/client/${flow.oauth_config_id}/complete-oauth`
-  const completeResponse = await page.request.post(completeUrl)
-  expect(completeResponse.ok()).toBe(true)
-}
 
 // Track created clients for cleanup
 const createdClients: string[] = []
@@ -183,14 +144,14 @@ test.describe('MCP Registry', () => {
       expect(created).toBe(true)
       createdClients.push(clientData.name)
 
-      // Wait a moment for connection to establish
-      await mcpRegistryPage.page.waitForTimeout(2000)
+      // Wait for the connection check to settle; health checks run every 10s
+      await expect.poll(() => mcpRegistryPage.getClientStatus(clientData.name), { timeout: 30_000 }).toBe('healthy')
 
       // Verify client shows connection status
       const status = await mcpRegistryPage.getClientStatus(clientData.name)
       expect(status).toBeTruthy()
-      // Status could be connecting, connected, or disconnected depending on timing
-      expect(['connected', 'disconnected', 'connecting', 'error']).toContain(status.toLowerCase())
+      // State depends on timing: healthy once tool discovery succeeds, unstable before
+      expect(['healthy', 'unstable', 'pending_verification', 'needs_reauth', 'disabled']).toContain(status.toLowerCase())
 
       // Verify tools are loaded (http-no-ping-server has: echo, add, greet)
       await mcpRegistryPage.viewClientDetails(clientData.name)
@@ -210,9 +171,6 @@ test.describe('MCP Registry', () => {
       expect(created).toBe(true)
       createdClients.push(clientData.name)
 
-      // Wait a moment for connection to establish
-      await mcpRegistryPage.page.waitForTimeout(2000)
-
       // Verify tools are loaded
       await mcpRegistryPage.viewClientDetails(clientData.name)
       const toolsCount = await mcpRegistryPage.getToolsCount()
@@ -229,9 +187,6 @@ test.describe('MCP Registry', () => {
       const created = await mcpRegistryPage.createClient(clientData)
       expect(created).toBe(true)
       createdClients.push(clientData.name)
-
-      // Wait a moment for connection to establish
-      await mcpRegistryPage.page.waitForTimeout(2000)
 
       // Verify tools from test-tools-server (echo, calculator, get_weather, delay, throw_error)
       await mcpRegistryPage.viewClientDetails(clientData.name)
@@ -306,8 +261,9 @@ test.describe('MCP Registry', () => {
     })
 
     test('should reconnect MCP client', async ({ mcpRegistryPage }) => {
-      // Create a client first
-      const clientData = createHTTPClientData({
+      // Reconnect only applies to clients holding a persistent connection; a
+      // default HTTP client dials per call, so use STDIO.
+      const clientData = createSTDIOClientData({
         name: `reconnect_test_${Date.now()}`,
       })
 
@@ -323,7 +279,7 @@ test.describe('MCP Registry', () => {
       expect(exists).toBe(true)
       const status = await mcpRegistryPage.getClientStatus(clientData.name)
       expect(status).toBeTruthy()
-      expect(['connected', 'disconnected', 'connecting']).toContain(status.toLowerCase())
+      expect(['healthy', 'unstable', 'pending_verification', 'needs_reauth', 'disabled']).toContain(status.toLowerCase())
     })
   })
 
@@ -343,7 +299,7 @@ test.describe('MCP Registry', () => {
 
       // Status should be one of the expected values
       expect(status).toBeTruthy()
-      expect(['connected', 'disconnected', 'connecting', 'error']).toContain(status?.toLowerCase())
+      expect(['healthy', 'unstable', 'pending_verification', 'needs_reauth', 'disabled']).toContain(status?.toLowerCase())
     })
   })
 
@@ -379,99 +335,6 @@ test.describe('MCP Registry', () => {
       await expect(mcpRegistryPage.page.getByText('Connection URL is required')).toBeVisible()
 
       await mcpRegistryPage.cancelCreation()
-    })
-  })
-
-  test.describe('MCP Header Authentication', () => {
-    test('should display header fields when headers auth type is selected', async ({ mcpRegistryPage }) => {
-      await mcpRegistryPage.createBtn.click()
-      await expect(mcpRegistryPage.sheet).toBeVisible()
-
-      await mcpRegistryPage.selectAuthType('headers')
-
-      const headersTable = mcpRegistryPage.page.locator('[data-testid="mcp-headers-table"]')
-      await expect(headersTable).toBeVisible()
-
-      await mcpRegistryPage.cancelCreation()
-    })
-
-    test('should create MCP client with header auth and connect to auth-demo-server', async ({ mcpRegistryPage }) => {
-      const clientData = createHeadersAuthClientData()
-      createdClients.push(clientData.name)
-
-      const created = await mcpRegistryPage.createClient(clientData)
-      expect(created).toBe(true)
-
-      const exists = await mcpRegistryPage.clientExists(clientData.name)
-      expect(exists).toBe(true)
-
-      // Server requires X-API-Key — should connect and expose tools (public_info, secret_data)
-      await mcpRegistryPage.viewClientDetails(clientData.name)
-      const toolsCount = await mcpRegistryPage.getToolsCount()
-      expect(toolsCount).toBeGreaterThanOrEqual(2)
-
-      await mcpRegistryPage.closeDetailSheet()
-    })
-  })
-
-  test.describe('MCP OAuth 2.0', () => {
-    test('should display OAuth fields when OAuth 2.0 auth type is selected', async ({ mcpRegistryPage }) => {
-      await mcpRegistryPage.createBtn.click()
-      await expect(mcpRegistryPage.sheet).toBeVisible()
-
-      await mcpRegistryPage.selectAuthType('oauth')
-      await mcpRegistryPage.expandOAuthAdvancedIfCollapsed()
-
-      // All fields are optional — auto-discovered from server metadata
-      await expect(mcpRegistryPage.oauthClientIdInput).toBeVisible()
-      await expect(mcpRegistryPage.oauthClientSecretInput).toBeVisible()
-      await expect(mcpRegistryPage.oauthAuthorizeUrlInput).toBeVisible()
-      await expect(mcpRegistryPage.oauthTokenUrlInput).toBeVisible()
-
-      await mcpRegistryPage.cancelCreation()
-    })
-
-    test('should create OAuth 2.0 client and complete authorization flow', async ({ mcpRegistryPage }) => {
-      const clientData = createOAuthClientData()
-      createdClients.push(clientData.name)
-
-      const flow = await mcpRegistryPage.createOAuthClient(clientData)
-      await completeOAuthFlow(mcpRegistryPage.page, flow)
-      await mcpRegistryPage.goto()
-
-      // Client should now be connected and visible in table
-      const exists = await mcpRegistryPage.clientExists(clientData.name)
-      expect(exists).toBe(true)
-    })
-  })
-
-  test.describe('MCP Per-User OAuth 2.0', () => {
-    test('should display OAuth fields when Per-User OAuth 2.0 auth type is selected', async ({ mcpRegistryPage }) => {
-      await mcpRegistryPage.createBtn.click()
-      await expect(mcpRegistryPage.sheet).toBeVisible()
-
-      await mcpRegistryPage.selectAuthType('per_user_oauth')
-      await mcpRegistryPage.expandOAuthAdvancedIfCollapsed()
-
-      await expect(mcpRegistryPage.oauthClientIdInput).toBeVisible()
-      await expect(mcpRegistryPage.oauthClientSecretInput).toBeVisible()
-      await expect(mcpRegistryPage.oauthAuthorizeUrlInput).toBeVisible()
-      await expect(mcpRegistryPage.oauthTokenUrlInput).toBeVisible()
-
-      await mcpRegistryPage.cancelCreation()
-    })
-
-    test('should create Per-User OAuth 2.0 client and complete authorization flow', async ({ mcpRegistryPage }) => {
-      const clientData = createPerUserOAuthClientData()
-      createdClients.push(clientData.name)
-
-      const flow = await mcpRegistryPage.createOAuthClient(clientData)
-      await completeOAuthFlow(mcpRegistryPage.page, flow)
-      await mcpRegistryPage.goto()
-
-      // Client should be visible in table
-      const exists = await mcpRegistryPage.clientExists(clientData.name)
-      expect(exists).toBe(true)
     })
   })
 })

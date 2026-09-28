@@ -419,14 +419,10 @@ test.describe('Routing Rules', () => {
       // Add a rule condition
       await routingRulesPage.clickAddRule()
 
-      // Wait for rule row to appear and CEL to update
-      await routingRulesPage.page.waitForTimeout(500)
-
       // After adding a rule, CEL should no longer say "No rules defined"
       // The default rule shows model == "" (empty model condition)
-      const celAfterAdd = await routingRulesPage.getCelExpression()
-      expect(celAfterAdd).not.toContain('No rules defined')
-      expect(celAfterAdd).toContain('model') // Default field is Model
+      await expect.poll(() => routingRulesPage.getCelExpression()).toContain('model') // Default field is Model
+      expect(await routingRulesPage.getCelExpression()).not.toContain('No rules defined')
 
       await routingRulesPage.cancelRule()
     })
@@ -446,21 +442,14 @@ test.describe('Routing Rules', () => {
       await routingRulesPage.clickAddRule()
       await routingRulesPage.clickAddRule()
 
-      // Wait for rules to render
-      await routingRulesPage.page.waitForTimeout(500)
-
-      // Get CEL with default AND combinator
-      const celWithAnd = await routingRulesPage.getCelExpression()
       // Default is AND - should have && operator
-      expect(celWithAnd).toContain('&&')
+      await expect.poll(() => routingRulesPage.getCelExpression()).toContain('&&')
 
       // Switch to OR
       await routingRulesPage.setCombinator('or')
-      await routingRulesPage.page.waitForTimeout(300)
 
       // Verify CEL now contains OR logic
-      const celWithOr = await routingRulesPage.getCelExpression()
-      expect(celWithOr).toContain('||')
+      await expect.poll(() => routingRulesPage.getCelExpression()).toContain('||')
 
       await routingRulesPage.cancelRule()
     })
@@ -543,11 +532,9 @@ test.describe('Routing Rules', () => {
 
       // Add a condition (default Model field with default operator)
       await routingRulesPage.clickAddRule()
-      await routingRulesPage.page.waitForTimeout(500)
 
       // Verify CEL was generated before saving
-      const celBeforeSave = await routingRulesPage.getCelExpression()
-      expect(celBeforeSave).not.toContain('No rules defined')
+      await expect.poll(() => routingRulesPage.getCelExpression()).not.toContain('No rules defined')
 
       // Save the rule
       await routingRulesPage.saveBtn.click()

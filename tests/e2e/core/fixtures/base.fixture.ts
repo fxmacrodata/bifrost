@@ -2,7 +2,9 @@ import { test as base, expect } from "@playwright/test";
 import { waitForNetworkIdle } from "../utils/test-helpers";
 import { SidebarPage } from "../pages/sidebar.page";
 import { ProvidersPage } from "../../features/providers/pages/providers.page";
+import { ProviderSettingsPage } from "../../features/providers/pages/providerSettings.page";
 import { VirtualKeysPage } from "../../features/virtual-keys/pages/virtual-keys.page";
+import { VirtualKeysManagementPage } from "../../features/virtual-keys/pages/virtualKeysManagement.page";
 import { DashboardPage } from "../../features/dashboard/pages/dashboard.page";
 import { LogsPage } from "../../features/logs/pages/logs.page";
 import { MCPLogsPage } from "../../features/mcp-logs/pages/mcp-logs.page";
@@ -26,7 +28,9 @@ type BifrostFixtures = {
 	skipAutoLogin: boolean;
 	sidebarPage: SidebarPage;
 	providersPage: ProvidersPage;
+	providerSettingsPage: ProviderSettingsPage;
 	virtualKeysPage: VirtualKeysPage;
+	virtualKeysManagementPage: VirtualKeysManagementPage;
 	dashboardPage: DashboardPage;
 	logsPage: LogsPage;
 	mcpLogsPage: MCPLogsPage;
@@ -54,6 +58,12 @@ export const test = base.extend<BifrostFixtures>({
 			await page.addInitScript(() => {
 				window.localStorage.setItem("devProfiler.isVisible", "false");
 				window.localStorage.setItem("devProfiler.isExpanded", "false");
+				// Toasts retired by BasePage.waitForToastsToDisappear vanish at once.
+				document.addEventListener("DOMContentLoaded", () => {
+					const style = document.createElement("style");
+					style.textContent = "[data-e2e-dismissed]{display:none!important}";
+					document.head.appendChild(style);
+				});
 			});
 
 			await page.addLocatorHandler(
@@ -124,8 +134,16 @@ export const test = base.extend<BifrostFixtures>({
 		await use(new ProvidersPage(page));
 	},
 
+	providerSettingsPage: async ({ page }, use) => {
+		await use(new ProviderSettingsPage(page));
+	},
+
 	virtualKeysPage: async ({ page }, use) => {
 		await use(new VirtualKeysPage(page));
+	},
+
+	virtualKeysManagementPage: async ({ page }, use) => {
+		await use(new VirtualKeysManagementPage(page));
 	},
 
 	dashboardPage: async ({ page }, use) => {
@@ -143,6 +161,7 @@ export const test = base.extend<BifrostFixtures>({
 	routingRulesPage: async ({ page }, use) => {
 		await use(new RoutingRulesPage(page));
 	},
+
 
 	mcpRegistryPage: async ({ page }, use) => {
 		await use(new MCPRegistryPage(page));
