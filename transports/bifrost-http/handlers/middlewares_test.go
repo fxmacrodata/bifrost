@@ -4198,3 +4198,57 @@ func TestRecoveryMiddleware_PanicBecomesInternalServerErrorAndServerKeepsServing
 		t.Fatalf("follow-up request got %d %q, want 200 ok", status, body)
 	}
 }
+
+// A disconnected caller leaves its worker still writing, so flushing at handler return
+// would send every connector a trace with no cost or model.
+func TestTracingMiddleware_DeferredCompletionWaitsForWorker(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	store := tracing.NewTraceStore(5*time.Minute, nil)
+	defer store.Stop()
+	tracer := tracing.NewTracer(store, nil, nil)
+	defer tracer.Stop()
+
+	plugin := &captureRootAttrsPlugin{done: make(chan struct{})}
+	tracer.SetObservabilityPlugins([]schemas.ObservabilityPlugin{plugin}, nil)
+
+	var traceID string
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.SetRequestURI("/v1/chat/completions")
+	ctx.Request.Header.SetMethod("POST")
+
+	NewTracingMiddleware(tracer).Middleware()(func(c *fasthttp.RequestCtx) {
+		traceID, _ = c.UserValue(schemas.BifrostContextKeyTraceID).(string)
+		// The caller's context ended and the worker won the handoff.
+		tracer.DeferTraceCompletion(traceID)
+		c.Response.SetStatusCode(499)
+	})(ctx)
+
+	// Handler returned and the defer ran; nothing may be exported yet.
+	select {
+	case <-plugin.done:
+		t.Fatal("trace was flushed at handler return despite a worker still owning it")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// The worker now finishes: it writes the late attributes, then completes the trace.
+	if h := tracer.GetSpanHandleByID(traceID, nil); h != nil {
+		tracer.SetAttribute(h, "gen_ai.usage.cost", 0.0421)
+	}
+	tracer.ClearTraceCompletionDeferral(traceID)
+	tracer.CompleteAndFlushTrace(traceID)
+
+	select {
+	case <-plugin.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker completion did not flush the trace")
+	}
+
+	// Exported exactly once, and carrying the worker's late write.
+	if got := plugin.attrs["gen_ai.usage.cost"]; got != 0.0421 {
+		t.Errorf("exported cost = %#v, want 0.0421 (the worker's late write must be in the snapshot)", got)
+	}
+	if tracer.IsTraceCompletionDeferred(traceID) {
+		t.Error("deferral marker outlived completion")
+	}
+}

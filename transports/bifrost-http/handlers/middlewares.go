@@ -1934,6 +1934,11 @@ func (m *TracingMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 			}
 			defer func() {
 				deferred, _ := ctx.UserValue(schemas.BifrostContextKeyDeferTraceCompletion).(bool)
+				// Completing here would flush an incomplete trace and recycle the span
+				// the worker is still writing to.
+				if !deferred && tracer.IsTraceCompletionDeferred(traceID) {
+					deferred = true
+				}
 				// Record response status on the root span
 				if rootSpan != nil {
 					tracer.SetAttribute(rootSpan, schemas.AttrHTTPResponseStatusCode, ctx.Response.StatusCode())
