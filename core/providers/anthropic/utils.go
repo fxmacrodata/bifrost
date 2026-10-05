@@ -153,7 +153,7 @@ func ValidateResponsesToolsForProvider(tools []schemas.ResponsesTool, caps schem
 			supported = caps.SupportsWebFetch(features.WebFetch)
 		case schemas.ResponsesToolTypeCodeInterpreter:
 			supported = caps.SupportsCodeExecution(features.CodeExecution || features.CodeExecNova)
-		case schemas.ResponsesToolTypeComputerUsePreview:
+		case schemas.ResponsesToolTypeComputerUsePreview, schemas.ResponsesToolTypeComputer:
 			supported = features.ComputerUse
 		case schemas.ResponsesToolTypeMCP:
 			supported = caps.SupportsMCP(features.MCP)

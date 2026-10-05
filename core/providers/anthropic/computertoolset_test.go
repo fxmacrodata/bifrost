@@ -403,3 +403,65 @@ func TestComputerToolset_RawBodyDropsUndowngradableToolset(t *testing.T) {
 	assert.Contains(t, types, "text_editor_20250728", "sibling tools carry no geometry and must survive: %s", out)
 	assert.Contains(t, types, "bash_20250124", "sibling tools carry no geometry and must survive: %s", out)
 }
+
+// The OpenAI computer tool carries no display geometry, so it can only become a
+// toolset; where the target takes no toolset it is dropped and reported.
+func TestComputerTool_OpenAIComputerToResponsesToolset(t *testing.T) {
+	computer := &schemas.ResponsesTool{Type: schemas.ResponsesToolTypeComputer}
+	for _, tc := range []struct {
+		name     string
+		provider schemas.ModelProvider
+		model    string
+		want     *AnthropicToolType
+	}{
+		{"toolset generation", schemas.Anthropic, "claude-opus-5-5", schemas.Ptr(AnthropicToolTypeComputerToolset20260801)},
+		{"dated generation that accepts the toolset", schemas.Anthropic, "claude-opus-4-8", schemas.Ptr(AnthropicToolTypeComputerToolset20260801)},
+		{"dated-only model", schemas.Anthropic, "claude-sonnet-4-6", nil},
+		{"surface without the toolset", schemas.Bedrock, "claude-opus-5-5", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := schemas.ResolveModelCaps(tc.provider, tc.model)
+			tool := convertBifrostToolToAnthropic(caps, computer, tc.provider, false)
+			if tc.want == nil {
+				assert.Nil(t, tool)
+				return
+			}
+			require.NotNil(t, tool)
+			require.NotNil(t, tool.Type)
+			assert.Equal(t, *tc.want, *tool.Type)
+			assert.Empty(t, tool.Name, "a toolset entry takes no name")
+			assert.Nil(t, tool.AnthropicToolComputerUse, "a toolset entry takes no display")
+		})
+	}
+}
+
+// Validation must report a dropped computer tool instead of letting it vanish in conversion.
+func TestComputerTool_ValidateCoversOpenAIComputer(t *testing.T) {
+	caps := schemas.ResolveModelCaps(schemas.Anthropic, "claude-opus-5-5")
+	keep, dropped := ValidateResponsesToolsForProvider([]schemas.ResponsesTool{{Type: schemas.ResponsesToolTypeComputer}}, caps)
+	assert.Len(t, keep, 1)
+	assert.Empty(t, dropped)
+}
+
+// A toolset has no geometry, so it maps to the OpenAI computer tool rather than a
+// 0x0 computer_use_preview; a dated tool keeps its display as computer_use_preview.
+func TestComputerTool_AnthropicToResponses(t *testing.T) {
+	toolset := convertAnthropicToolToBifrost(&AnthropicTool{Type: schemas.Ptr(AnthropicToolTypeComputerToolset20260801)})
+	require.NotNil(t, toolset)
+	assert.Equal(t, schemas.ResponsesToolTypeComputer, toolset.Type)
+	assert.Nil(t, toolset.ResponsesToolComputerUsePreview)
+
+	dated := convertAnthropicToolToBifrost(&AnthropicTool{
+		Type: schemas.Ptr(AnthropicToolTypeComputer20251124),
+		Name: "computer",
+		AnthropicToolComputerUse: &AnthropicToolComputerUse{
+			DisplayWidthPx:  schemas.Ptr(1280),
+			DisplayHeightPx: schemas.Ptr(800),
+		},
+	})
+	require.NotNil(t, dated)
+	assert.Equal(t, schemas.ResponsesToolTypeComputerUsePreview, dated.Type)
+	require.NotNil(t, dated.ResponsesToolComputerUsePreview)
+	assert.Equal(t, 1280, dated.ResponsesToolComputerUsePreview.DisplayWidth)
+	assert.Equal(t, 800, dated.ResponsesToolComputerUsePreview.DisplayHeight)
+}
