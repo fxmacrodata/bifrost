@@ -9023,7 +9023,7 @@ func applyAnthropicToolFlagsToResponsesTool(at *AnthropicTool, rt *schemas.Respo
 }
 
 // applyResponsesToolAnthropicFlags propagates the Anthropic-native tool flags
-// (DeferLoading, AllowedCallers, InputExamples, EagerInputStreaming) from the
+// (DeferLoading, AllowedCallers, InputExamples, EagerInputStreaming, CacheControl) from the
 // neutral ResponsesTool onto the provider-native AnthropicTool. Called once
 // per converted tool so every branch in convertBifrostToolToAnthropic
 // benefits without duplicating the logic on each return path.
@@ -9048,6 +9048,9 @@ func applyResponsesToolAnthropicFlags(at *AnthropicTool, rt *schemas.ResponsesTo
 	}
 	if rt.EagerInputStreaming != nil {
 		at.EagerInputStreaming = rt.EagerInputStreaming
+	}
+	if rt.CacheControl != nil {
+		at.CacheControl = rt.CacheControl
 	}
 }
 

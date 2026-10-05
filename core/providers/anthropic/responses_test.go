@@ -1994,3 +1994,45 @@ func TestConvertBifrostToolOutputFallbackPreservesExistingBehavior(t *testing.T)
 		}
 	})
 }
+
+// TestConvertBifrostToolsToAnthropic_ServerToolCacheControl pins that a
+// cache_control breakpoint on a server tool reaches Anthropic for every branch
+// of convertBifrostToolToAnthropic, not only the generic function path.
+func TestConvertBifrostToolsToAnthropic_ServerToolCacheControl(t *testing.T) {
+	const cc = `"cache_control":{"type":"ephemeral"}`
+	for _, tc := range []struct {
+		name  string
+		model string
+		raw   string
+	}{
+		{"function", "claude-sonnet-4-6", `{"type":"function","name":"get_weather",` + cc + `}`},
+		{"computer dated", "claude-sonnet-4-6", `{"type":"computer_use_preview","display_width":1280,"display_height":800,"environment":"browser",` + cc + `}`},
+		{"computer toolset", "claude-opus-5-5", `{"type":"computer_use_preview","display_width":1280,"display_height":800,"environment":"browser",` + cc + `}`},
+		{"code interpreter", "claude-sonnet-4-6", `{"type":"code_interpreter",` + cc + `}`},
+		{"web search", "claude-sonnet-4-6", `{"type":"web_search",` + cc + `}`},
+		{"web fetch", "claude-sonnet-4-6", `{"type":"web_fetch",` + cc + `}`},
+		{"memory", "claude-sonnet-4-6", `{"type":"memory_20250818","name":"memory",` + cc + `}`},
+		{"tool search", "claude-sonnet-4-6", `{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex",` + cc + `}`},
+		{"local shell", "claude-sonnet-4-6", `{"type":"local_shell",` + cc + `}`},
+		{"text editor", "claude-sonnet-4-6", `{"type":"text_editor_20250728","name":"str_replace_based_edit_tool",` + cc + `}`},
+		{"advisor", "claude-sonnet-4-6", `{"type":"advisor_20260301","name":"advisor","model":"claude-opus-4-8",` + cc + `}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := schemas.ResolveModelCaps(schemas.Anthropic, tc.model)
+			tools, _, err := convertBifrostToolsToAnthropic(caps, []schemas.ResponsesTool{responsesToolFromJSON(t, tc.raw)}, schemas.Anthropic)
+			if err != nil {
+				t.Fatalf("convert failed: %v", err)
+			}
+			if len(tools) != 1 {
+				t.Fatalf("expected one tool, got %d", len(tools))
+			}
+			data, err := sonic.Marshal(tools[0])
+			if err != nil {
+				t.Fatalf("marshal failed: %v", err)
+			}
+			if !strings.Contains(string(data), cc) {
+				t.Fatalf("cache_control dropped: %s", data)
+			}
+		})
+	}
+}
